@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Who Lied? — Logic Deduction Puzzle</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; }
+  .suspect-card { transition: all 0.2s ease; }
+  .suspect-card.knight { border-color: #22d3ee; box-shadow: 0 0 12px rgba(34,211,238,0.3); }
+  .suspect-card.liar  { border-color: #f87171; box-shadow: 0 0 12px rgba(248,113,113,0.3); }
+  .suspect-card.unset { border-color: #374151; }
+  .step-entry { animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+  .tab-active { background: #1e40af; color:#fff; }
+  .tab-inactive { background: #1f2937; color:#9ca3af; }
+</style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+<div class="max-w-3xl mx-auto p-4">
+  <!-- Header -->
+  <div class="text-center mb-6">
+    <h1 class="text-3xl font-bold text-cyan-400 mb-1">Who Lied?</h1>
+    <p class="text-gray-400 text-sm">Logic deduction puzzle — find the liars among the witnesses</p>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="flex gap-3 justify-center mb-5 text-sm">
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-yellow-400 font-bold" id="stat-streak">0</div>
+      <div class="text-gray-500 text-xs">Streak</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-green-400 font-bold" id="stat-solved">0</div>
+      <div class="text-gray-500 text-xs">Solved</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-cyan-400 font-bold" id="stat-time">0:00</div>
+      <div class="text-gray-500 text-xs">Time</div>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-4 py-2 text-center">
+      <div class="text-orange-400 font-bold" id="stat-hints">0</div>
+      <div class="text-gray-500 text-xs">Hints</div>
+    </div>
+  </div>
+
+  <!-- Difficulty tabs -->
+  <div class="flex gap-2 mb-4 justify-center">
+    <button onclick="setDifficulty('easy')" id="tab-easy" class="tab-btn rounded-full px-5 py-1.5 text-sm font-semibold transition-all" aria-label="Easy difficulty">Easy</button>
+    <button onclick="setDifficulty('medium')" id="tab-medium" class="tab-btn rounded-full px-5 py-1.5 text-sm font-semibold transition-all" aria-label="Medium difficulty">Medium</button>
+    <button onclick="setDifficulty('hard')" id="tab-hard" class="tab-btn rounded-full px-5 py-1.5 text-sm font-semibold transition-all" aria-label="Hard difficulty">Hard</button>
+  </div>
+
+  <!-- Puzzle area -->
+  <div id="puzzle-panel" class="bg-gray-800 rounded-2xl p-5 mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <span class="text-gray-400 text-xs uppercase tracking-wider">Puzzle</span>
+        <span id="puzzle-num" class="ml-2 text-white font-bold">#1</span>
+        <span id="puzzle-diff-badge" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300">Easy</span>
+      </div>
+      <button onclick="loadNextPuzzle()" class="text-xs bg-gray-700 hover:bg-gray-600 rounded-lg px-3 py-1.5 transition-colors" aria-label="Next puzzle">Next →</button>
+    </div>
+    <p id="puzzle-desc" class="text-gray-300 text-sm mb-4 italic"></p>
+
+    <!-- Suspects -->
+    <div id="suspects-grid" class="grid grid-cols-2 gap-3 mb-4 sm:grid-cols-3"></div>
+
+    <!-- Action buttons -->
+    <div class="flex flex-wrap gap-2">
+      <button onclick="checkSolution()" class="bg-cyan-700 hover:bg-cyan-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Check your solution">Check Answer</button>
+      <button onclick="useHint()" class="bg-yellow-700 hover:bg-yellow-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Get a hint">Hint 💡</button>
+      <button onclick="showSolution()" class="bg-gray-700 hover:bg-gray-600 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Reveal solution">Show Solution</button>
+      <button onclick="resetPuzzle()" class="bg-red-900 hover:bg-red-800 rounded-lg px-4 py-2 text-sm font-semibold transition-colors" aria-label="Reset puzzle">Reset</button>
+    </div>
+  </div>
+
+  <!-- Feedback area -->
+  <div id="feedback" class="hidden bg-gray-800 rounded-2xl p-4 mb-4"></div>
+
+  <!-- Solution steps -->
+  <div id="solution-panel" class="hidden bg-gray-800 rounded-2xl p-5">
+    <h2 class="text-cyan-400 font-bold mb-3">Step-by-Step Solution</h2>
+    <ol id="solution-steps" class="space-y-2 text-sm text-gray-300"></ol>
+  </div>
+</div>
+
+<script>
+// ---- Data ----
+const PUZZLES = [
+  // EASY (4 people, 1 liar)
+  {
+    id: 1, difficulty: 'easy',
+    desc: 'Four people were at the library. Exactly one is lying.',
+    people: ['Alice','Bob','Carol','Dan'],
+    liars: ['Carol'],
+    statements: [
+      { speaker:'Alice', text:'Bob is telling the truth.' },
+      { speaker:'Bob',   text:'Carol is telling the truth.' },
+      { speaker:'Carol', text:'Dan is lying.' },
+      { speaker:'Dan',   text:'Alice is telling the truth.' },
+    ],
+    solution: ['Alice is honest.','Bob is honest.','Carol is lying: she says Dan lies, but Dan is honest.','Dan is honest.']
+  },
+  {
+    id: 2, difficulty: 'easy',
+    desc: 'Four people give testimony. Exactly one is lying.',
+    people: ['Eli','Fay','Gil','Han'],
+    liars: ['Fay'],
+    statements: [
+      { speaker:'Eli', text:'Exactly one person is lying.' },
+      { speaker:'Fay', text:'Eli is lying.' },
+      { speaker:'Gil', text:'Fay is lying.' },
+      { speaker:'Han', text:'Gil is telling the truth.' },
+    ],
+    solution: ['Assume Fay is the only liar.','Eli says one person lies — true.','Fay says Eli lies — false (Fay is liar, consistent).','Gil says Fay lies — true.','Han says Gil is honest — true. Consistent!']
+  },
+  {
+    id: 3, difficulty: 'easy',
+    desc: 'Four suspects at a crime scene. Exactly one is lying.',
+    people: ['Ivan','Jade','Karl','Lena'],
+    liars: ['Karl'],
+    statements: [
+      { speaker:'Ivan', text:'Karl is a liar.' },
+      { speaker:'Jade', text:'Ivan is telling the truth.' },
+      { speaker:'Karl', text:'Jade is a liar.' },
+      { speaker:'Lena', text:'Karl is a liar.' },
+    ],
+    solution: ['Ivan says Karl lies. If true, Karl is the liar.','Jade confirms Ivan is honest — consistent.','Karl says Jade lies — false (Karl is the liar).','Lena says Karl lies — true. All consistent!']
+  },
+  {
+    id: 4, difficulty: 'easy',
+    desc: 'At a dinner party, exactly one person lied.',
+    people: ['Mia','Ned','Ora','Pat'],
+    liars: ['Ned'],
+    statements: [
+      { speaker:'Mia', text:'At least two people are lying.' },
+      { speaker:'Ned', text:'Mia is lying.' },
+      { speaker:'Ora', text:'Ned is lying.' },
+      { speaker:'Pat', text:'Ned is lying.' },
+    ],
+    solution: ['If exactly 1 lies, Mia\'s "at least 2 lie" is false → Mia lies? But then 2 would lie — contradiction.','So Mia is honest? Then ≥2 lie, contradicting "exactly 1". So Ned must be the liar.','Ned says Mia lies — false. Ora and Pat both say Ned lies — true. Exactly 1 liar = Ned. ✓']
+  },
+  {
+    id: 5, difficulty: 'easy',
+    desc: 'Five people at a book club. Exactly one is lying.',
+    people: ['Quinn','Rose','Sam','Tina','Uma'],
+    liars: ['Sam'],
+    statements: [
+      { speaker:'Quinn', text:'Rose is telling the truth.' },
+      { speaker:'Rose',  text:'Sam is lying.' },
+      { speaker:'Sam',   text:'Quinn is lying.' },
+      { speaker:'Tina',  text:'Sam is lying.' },
+      { speaker:'Uma',   text:'Tina is telling the truth.' },
+    ],
+    solution: ['Rose says Sam lies. Sam says Quinn lies. If Sam is the liar, Quinn is honest (Sam\'s claim is false).','Quinn says Rose is honest — true. Rose says Sam lies — true. Tina says Sam lies — true. Uma confirms Tina — true. Exactly one liar: Sam ✓']
+  },
+  {
+    id: 6, difficulty: 'easy',
+    desc: 'Four students took an exam. Exactly one cheated (and thus lied about it).',
+    people: ['Vera','Will','Xia','Yuri'],
+    liars: ['Will'],
+    statements: [
+      { speaker:'Vera', text:'Will cheated.' },
+      { speaker:'Will', text:'I did not cheat.' },
+      { speaker:'Xia',  text:'Will cheated.' },
+      { speaker:'Yuri', text:'Vera is telling the truth.' },
+    ],
+    solution: ['Vera says Will cheated. Will denies it. If Will lied: his denial is false → he cheated.','Xia confirms Will cheated. Yuri confirms Vera. All honest except Will. Exactly 1 liar ✓']
+  },
+  // MEDIUM (5 people, 1-2 liars)
+  {
+    id: 7, difficulty: 'medium',
+    desc: 'Five witnesses. Exactly two are lying.',
+    people: ['Alex','Beth','Cary','Drew','Eric'],
+    liars: ['Beth','Drew'],
+    statements: [
+      { speaker:'Alex', text:'Beth is a liar.' },
+      { speaker:'Beth', text:'Cary is a liar.' },
+      { speaker:'Cary', text:'Drew is a liar.' },
+      { speaker:'Drew', text:'Eric is a liar.' },
+      { speaker:'Eric', text:'Alex is telling the truth.' },
+    ],
+    solution: ['Exactly 2 liars in a chain of accusations.','If Alex is honest → Beth is a liar.','Beth (liar) says Cary lies → Cary is honest.','Cary (honest) says Drew lies → Drew is a liar.','Drew (liar) says Eric lies → Eric is honest.','Eric says Alex is honest → true. Total liars: Beth & Drew = 2 ✓']
+  },
+  {
+    id: 8, difficulty: 'medium',
+    desc: 'Five people at a party. Exactly two are lying.',
+    people: ['Finn','Gina','Hugo','Iris','Jake'],
+    liars: ['Finn','Iris'],
+    statements: [
+      { speaker:'Finn', text:'Gina is a liar.' },
+      { speaker:'Gina', text:'Hugo is telling the truth.' },
+      { speaker:'Hugo', text:'Iris is a liar.' },
+      { speaker:'Iris', text:'Jake is a liar.' },
+      { speaker:'Jake', text:'Finn is a liar.' },
+    ],
+    solution: ['Jake says Finn lies → test: assume Finn is a liar.','Finn (liar) says Gina lies → Gina is honest.','Gina (honest) says Hugo is honest → Hugo is honest.','Hugo (honest) says Iris lies → Iris is a liar.','Iris (liar) says Jake lies → Jake is honest.','Jake (honest) says Finn lies → true. Liars: Finn & Iris = 2 ✓']
+  },
+  {
+    id: 9, difficulty: 'medium',
+    desc: 'Five suspects. Exactly one is lying.',
+    people: ['Kai','Leo','Mab','Noa','Oda'],
+    liars: ['Leo'],
+    statements: [
+      { speaker:'Kai', text:'Exactly one person is lying.' },
+      { speaker:'Leo', text:'Exactly two people are lying.' },
+      { speaker:'Mab', text:'Leo is the only liar.' },
+      { speaker:'Noa', text:'Kai is telling the truth.' },
+      { speaker:'Oda', text:'Mab is telling the truth.' },
+    ],
+    solution: ['Kai and Leo make contradictory claims about the number of liars.','If exactly 1 lies: Kai is right, Leo is wrong → Leo is the liar.','Mab says Leo is the only liar — true. Noa confirms Kai — true. Oda confirms Mab — true. ✓']
+  },
+  {
+    id: 10, difficulty: 'medium',
+    desc: 'Five coworkers. Exactly two are lying.',
+    people: ['Pen','Quin','Reed','Sage','Tate'],
+    liars: ['Quin','Sage'],
+    statements: [
+      { speaker:'Pen',  text:'Quin and Sage are both liars.' },
+      { speaker:'Quin', text:'Pen is a liar.' },
+      { speaker:'Reed', text:'Pen is telling the truth.' },
+      { speaker:'Sage', text:'Reed is a liar.' },
+      { speaker:'Tate', text:'Sage is a liar.' },
+    ],
+    solution: ['Pen says Quin and Sage are both liars. Reed confirms Pen.','If Pen is honest → Quin and Sage are liars.','Quin (liar) says Pen lies → false, consistent.','Sage (liar) says Reed lies → false (Reed is honest), consistent.','Tate says Sage lies → true. 2 liars: Quin & Sage ✓']
+  },
+  {
+    id: 11, difficulty: 'medium',
+    desc: 'Five athletes after a race. Exactly two are lying.',
+    people: ['Uri','Val','Wes','Xen','Yael'],
+    liars: ['Val','Xen'],
+    statements: [
+      { speaker:'Uri',  text:'Val is lying.' },
+      { speaker:'Val',  text:'Uri and Wes are both honest.' },
+      { speaker:'Wes',  text:'Xen is lying.' },
+      { speaker:'Xen',  text:'Wes is lying.' },
+      { speaker:'Yael', text:'Uri is telling the truth.' },
+    ],
+    solution: ['Uri says Val lies. Val says Uri and Wes are both honest.','If Val is a liar, her statement is false: either Uri or Wes lies (or both).','Assume Val is a liar. Wes says Xen lies; Xen says Wes lies — one of them must be lying.','If Xen is also a liar: Wes is honest (Xen\'s false claim). Val is a liar (as assumed). Uri says Val lies — true. Yael confirms Uri — true. 2 liars: Val & Xen ✓']
+  },
+  {
+    id: 12, difficulty: 'medium',
+    desc: 'Six town members. Exactly two are lying.',
+    people: ['Ann','Ben','Cal','Dee','Eve','Fox'],
+    liars: ['Ben','Eve'],
+    statements: [
+      { speaker:'Ann', text:'Ben is a liar.' },
+      { speaker:'Ben', text:'Cal is a liar.' },
+      { speaker:'Cal', text:'Dee is telling the truth.' },
+      { speaker:'Dee', text:'Eve is a liar.' },
+      { speaker:'Eve', text:'Fox is a liar.' },
+      { speaker:'Fox', text:'Ann is telling the truth.' },
+    ],
+    solution: ['Ann says Ben lies. Fox says Ann is honest. If both honest, Ben is a liar.','Ben (liar) says Cal lies → Cal is honest.','Cal (honest) says Dee is honest → Dee is honest.','Dee (honest) says Eve lies → Eve is a liar.','Eve (liar) says Fox lies → Fox is honest.','Fox says Ann is honest → true. 2 liars: Ben & Eve ✓']
+  },
+  // HARD (5-6 people, 2 liars, complex logic)
+  {
+    id: 13, difficulty: 'hard',
+    desc: 'Six people at a town hall. Exactly two are lying. Statements involve counts and alliances.',
+    people: ['Adam','Brie','Cole','Dana','Evan','Faye'],
+    liars: ['Brie','Evan'],
+    statements: [
+      { speaker:'Adam', text:'The number of liars is even.' },
+      { speaker:'Brie', text:'Adam is a liar.' },
+      { speaker:'Cole', text:'At least three people are liars.' },
+      { speaker:'Dana', text:'Cole is lying.' },
+      { speaker:'Evan', text:'Dana is a liar.' },
+      { speaker:'Faye', text:'Evan is a liar.' },
+    ],
+    solution: ['Adam: "# liars is even" — 2 is even, so if 2 liars exist, Adam is honest.','Cole: "≥3 liars" — if exactly 2, Cole is lying.','Dana: "Cole is lying" — if Cole lies, Dana is honest.','So both Cole and Dana: one honest (Dana) one liar (Cole)? No — Dana says Cole lies which is true, so Dana is honest.','Brie says Adam lies → if Brie is liar, Adam is honest. ✓','Evan says Dana lies → if Evan is liar, Dana is honest. ✓','Faye says Evan lies → true. Liars: Brie & Evan ✓ (even count satisfied)']
+  },
+  {
+    id: 14, difficulty: 'hard',
+    desc: 'Five suspects. Exactly two are lying. Watch for circular accusations.',
+    people: ['Hana','Ivan','Juno','Kirk','Lynn'],
+    liars: ['Hana','Kirk'],
+    statements: [
+      { speaker:'Hana', text:'Ivan and Juno are both honest.' },
+      { speaker:'Ivan', text:'Hana is a liar.' },
+      { speaker:'Juno', text:'Kirk is a liar.' },
+      { speaker:'Kirk', text:'Juno is a liar.' },
+      { speaker:'Lynn', text:'Hana is a liar.' },
+    ],
+    solution: ['Ivan and Lynn both accuse Hana. If both honest → Hana is a liar.','Hana (liar) says Ivan and Juno are both honest → at least one of them is a liar.','Ivan is honest (we assumed). So Juno must be the second liar? Check: Juno says Kirk is a liar.','If Juno were a liar → Kirk is honest. Kirk says Juno lies → true. But if Juno is honest, Kirk is the liar.','Test: Hana & Kirk are liars. Ivan honest: says Hana lies ✓. Juno honest: says Kirk lies ✓. Kirk (liar): says Juno lies ✗. Lynn: says Hana lies ✓. Total 2 liars ✓']
+  },
+  {
+    id: 15, difficulty: 'hard',
+    desc: 'Six witnesses at an inquiry. Exactly two are lying. Multiple conditional claims.',
+    people: ['Nero','Opal','Puck','Remi','Sora','Tara'],
+    liars: ['Opal','Remi'],
+    statements: [
+      { speaker:'Nero', text:'Opal is a liar.' },
+      { speaker:'Opal', text:'Nero and Puck are both liars.' },
+      { speaker:'Puck', text:'Remi is a liar.' },
+      { speaker:'Remi', text:'Sora is a liar.' },
+      { speaker:'Sora', text:'Tara is telling the truth.' },
+      { speaker:'Tara', text:'Nero is telling the truth.' },
+    ],
+    solution: ['Nero says Opal lies. Tara says Nero is honest. If both honest → Opal is liar.','Opal (liar) says Nero and Puck are both liars → at least one is honest. Nero confirmed honest. Puck may be honest.','Puck (honest) says Remi lies → Remi is a liar.','Remi (liar) says Sora lies → Sora is honest.','Sora (honest) says Tara is honest → true. Tara says Nero is honest → true.','Liars: Opal & Remi = 2 ✓']
+  },
+  {
+    id: 16, difficulty: 'hard',
+    desc: 'Five colleagues. Exactly two are lying. Numbers and identities intertwine.',
+    people: ['Ulric','Vera','Wynn','Xara','Zola'],
+    liars: ['Ulric','Xara'],
+    statements: [
+      { speaker:'Ulric', text:'Vera is a liar.' },
+      { speaker:'Vera',  text:'Ulric is a liar.' },
+      { speaker:'Wynn',  text:'Exactly two people are lying.' },
+      { speaker:'Xara',  text:'Wynn is a liar.' },
+      { speaker:'Zola',  text:'Xara is a liar.' },
+    ],
+    solution: ['Ulric and Vera accuse each other. Exactly one of them is a liar (if both were liars, that\'s 2 already — check further).','Wynn says exactly 2 lie. If Wynn is honest, exactly 2 liars.','Xara says Wynn lies → if Xara is a liar, Wynn is honest ✓.','Zola says Xara lies → if Zola honest, Xara is a liar ✓.','Ulric vs Vera: one liar. Ulric says Vera lies. If Ulric is the liar → Vera is honest. Vera says Ulric lies → true. ✓ Liars: Ulric & Xara = 2 ✓']
+  },
+  {
+    id: 17, difficulty: 'hard',
+    desc: 'Six jurors deliberate. Exactly two are lying. Some statements are about statement counts.',
+    people: ['Abel','Bess','Clad','Dion','Emre','Fern'],
+    liars: ['Clad','Dion'],
+    statements: [
+      { speaker:'Abel', text:'Clad and Dion are both liars.' },
+      { speaker:'Bess', text:'Abel is telling the truth.' },
+      { speaker:'Clad', text:'Abel is a liar.' },
+      { speaker:'Dion', text:'Bess is a liar.' },
+      { speaker:'Emre', text:'Clad is a liar.' },
+      { speaker:'Fern', text:'Dion is a liar.' },
+    ],
+    solution: ['Abel says Clad and Dion are both liars. Bess confirms Abel.','If Abel and Bess are honest → Clad and Dion are liars (exactly 2).','Clad (liar) says Abel lies → false, consistent.','Dion (liar) says Bess lies → false (Bess is honest), consistent.','Emre says Clad lies → true. Fern says Dion lies → true.','Liars: Clad & Dion = 2 ✓']
+  },
+  {
+    id: 18, difficulty: 'hard',
+    desc: 'Five scientists at a conference. Exactly two are lying. Watch out for a liar confirming a liar.',
+    people: ['Gail','Holt','Ines','Jace','Kira'],
+    liars: ['Gail','Jace'],
+    statements: [
+      { speaker:'Gail', text:'Holt is a liar.' },
+      { speaker:'Holt', text:'Ines is telling the truth.' },
+      { speaker:'Ines', text:'Jace is a liar.' },
+      { speaker:'Jace', text:'Ines is a liar.' },
+      { speaker:'Kira', text:'Gail is a liar.' },
+    ],
+    solution: ['Ines and Jace accuse each other → exactly one is a liar.','Kira says Gail is a liar. If Kira honest → Gail is a liar.','Gail (liar) says Holt is a liar → Holt is honest.','Holt (honest) says Ines is honest → Ines is honest.','Ines (honest) says Jace lies → Jace is a liar.','Jace (liar) says Ines lies → false, consistent. Liars: Gail & Jace = 2 ✓']
+  },
+  {
+    id: 19, difficulty: 'hard',
+    desc: 'Six people at a gallery. Exactly two are lying. One statement involves all others.',
+    people: ['Lara','Marc','Nova','Otto','Peri','Quil'],
+    liars: ['Nova','Otto'],
+    statements: [
+      { speaker:'Lara', text:'Nova is a liar.' },
+      { speaker:'Marc', text:'Lara is telling the truth.' },
+      { speaker:'Nova', text:'Marc is a liar.' },
+      { speaker:'Otto', text:'Peri is a liar.' },
+      { speaker:'Peri', text:'Otto is a liar.' },
+      { speaker:'Quil', text:'Exactly two people are lying.' },
+    ],
+    solution: ['Quil says exactly 2 lie. Lara says Nova lies; Marc confirms Lara.','If Lara and Marc are honest → Nova is a liar.','Nova (liar) says Marc lies → false, consistent.','Peri and Otto accuse each other → exactly one is a liar.','If Otto is the second liar: Otto (liar) says Peri lies → false, Peri is honest. Peri (honest) says Otto lies → true.','Liars: Nova & Otto = 2, Quil\'s claim true ✓']
+  },
+  {
+    id: 20, difficulty: 'hard',
+    desc: 'Five investigators. Exactly two are lying. Cross-checking creates a complex web.',
+    people: ['Rhys','Suki','Thad','Uwe','Viv'],
+    liars: ['Suki','Uwe'],
+    statements: [
+      { speaker:'Rhys', text:'Suki is a liar.' },
+      { speaker:'Suki', text:'Thad is a liar.' },
+      { speaker:'Thad', text:'Uwe is a liar.' },
+      { speaker:'Uwe',  text:'Viv is a liar.' },
+      { speaker:'Viv',  text:'Rhys is telling the truth.' },
+    ],
+    solution: ['Chain: Rhys→Suki→Thad→Uwe→Viv→Rhys. Exactly 2 liars.','If Rhys is honest → Suki is a liar.','Suki (liar) says Thad lies → Thad is honest.','Thad (honest) says Uwe lies → Uwe is a liar.','Uwe (liar) says Viv lies → Viv is honest.','Viv (honest) says Rhys is honest → true. Liars: Suki & Uwe = 2 ✓']
+  },
+];
+
+// ---- State ----
+let currentPuzzle = null;
+let assignments = {}; // name -> 'knight' | 'liar' | null
+let hintsUsed = 0;
+let timerInterval = null;
+let timerSeconds = 0;
+let difficulty = 'easy';
+let sessionStats = { streak:0, solved:0 };
+let puzzleIndex = { easy:0, medium:0, hard:0 };
+
+function loadStats() {
+  try {
+    const s = JSON.parse(localStorage.getItem('liar-puzzle-stats') || '{}');
+    sessionStats.streak = s.streak || 0;
+    sessionStats.solved = s.solved || 0;
+    puzzleIndex = s.puzzleIndex || { easy:0, medium:0, hard:0 };
+  } catch(e){}
+  updateStatDisplay();
+}
+
+function saveStats() {
+  localStorage.setItem('liar-puzzle-stats', JSON.stringify({
+    streak: sessionStats.streak,
+    solved: sessionStats.solved,
+    puzzleIndex
+  }));
+}
+
+function updateStatDisplay() {
+  document.getElementById('stat-streak').textContent = sessionStats.streak;
+  document.getElementById('stat-solved').textContent = sessionStats.solved;
+  document.getElementById('stat-hints').textContent = hintsUsed;
+}
+
+function setDifficulty(d) {
+  difficulty = d;
+  ['easy','medium','hard'].forEach(x => {
+    const el = document.getElementById('tab-'+x);
+    el.className = 'tab-btn rounded-full px-5 py-1.5 text-sm font-semibold transition-all ' +
+      (x === d ? 'tab-active' : 'tab-inactive');
+  });
+  loadPuzzleByDifficulty();
+}
+
+function loadPuzzleByDifficulty() {
+  const pool = PUZZLES.filter(p => p.difficulty === difficulty);
+  const idx = puzzleIndex[difficulty] % pool.length;
+  currentPuzzle = pool[idx];
+  hintsUsed = 0;
+  resetPuzzleState();
+  renderPuzzle();
+  startTimer();
+}
+
+function loadNextPuzzle() {
+  puzzleIndex[difficulty] = (puzzleIndex[difficulty] + 1);
+  saveStats();
+  loadPuzzleByDifficulty();
+}
+
+function resetPuzzle() {
+  hintsUsed = 0;
+  resetPuzzleState();
+  renderPuzzle();
+}
+
+function resetPuzzleState() {
+  assignments = {};
+  currentPuzzle.people.forEach(p => assignments[p] = null);
+  document.getElementById('feedback').className = 'hidden bg-gray-800 rounded-2xl p-4 mb-4';
+  document.getElementById('solution-panel').className = 'hidden bg-gray-800 rounded-2xl p-5';
+  updateStatDisplay();
+}
+
+function renderPuzzle() {
+  const p = currentPuzzle;
+  document.getElementById('puzzle-num').textContent = '#' + p.id;
+  const badge = document.getElementById('puzzle-diff-badge');
+  badge.textContent = p.difficulty.charAt(0).toUpperCase() + p.difficulty.slice(1);
+  badge.className = 'ml-2 text-xs px-2 py-0.5 rounded-full ' +
+    (p.difficulty==='easy' ? 'bg-green-900 text-green-300' :
+     p.difficulty==='medium' ? 'bg-yellow-900 text-yellow-300' :
+     'bg-red-900 text-red-300');
+  document.getElementById('puzzle-desc').textContent = p.desc;
+
+  const grid = document.getElementById('suspects-grid');
+  grid.innerHTML = '';
+  p.people.forEach(name => {
+    const stmt = p.statements.find(s => s.speaker === name);
+    const card = document.createElement('div');
+    card.id = 'card-' + name;
+    card.className = 'suspect-card unset border-2 rounded-xl p-3 bg-gray-750';
+    card.style.background = '#1f2937';
+    card.innerHTML = `
+      <div class="flex items-center gap-2 mb-2">
+        <div class="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-sm font-bold text-white">${name[0]}</div>
+        <span class="font-semibold text-white">${name}</span>
+        <span id="badge-${name}" class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">?</span>
+      </div>
+      <p class="text-gray-400 text-xs italic mb-3">"${stmt ? stmt.text : ''}"</p>
+      <div class="flex gap-2">
+        <button onclick="setAssignment('${name}','knight')" class="flex-1 text-xs py-1.5 rounded-lg border transition-all ${assignments[name]==='knight' ? 'border-cyan-400 bg-cyan-900 text-cyan-300' : 'border-gray-600 text-gray-400 hover:border-cyan-500'}" aria-label="Mark ${name} as Knight (truth-teller)">Knight</button>
+        <button onclick="setAssignment('${name}','liar')" class="flex-1 text-xs py-1.5 rounded-lg border transition-all ${assignments[name]==='liar' ? 'border-red-400 bg-red-900 text-red-300' : 'border-gray-600 text-gray-400 hover:border-red-500'}" aria-label="Mark ${name} as Liar">Liar</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function setAssignment(name, type) {
+  assignments[name] = assignments[name] === type ? null : type;
+  renderSuspectCard(name);
+}
+
+function renderSuspectCard(name) {
+  const p = currentPuzzle;
+  const stmt = p.statements.find(s => s.speaker === name);
+  const asgn = assignments[name];
+  const card = document.getElementById('card-'+name);
+  card.className = 'suspect-card border-2 rounded-xl p-3 ' +
+    (asgn === 'knight' ? 'knight' : asgn === 'liar' ? 'liar' : 'unset');
+  card.style.background = '#1f2937';
+  const badge = document.getElementById('badge-'+name);
+  if (asgn === 'knight') { badge.textContent = 'Knight'; badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300'; }
+  else if (asgn === 'liar') { badge.textContent = 'Liar'; badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300'; }
+  else { badge.textContent = '?'; badge.className = 'ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400'; }
+  card.querySelectorAll('button').forEach(btn => {
+    if (btn.textContent.trim() === 'Knight') {
+      btn.className = 'flex-1 text-xs py-1.5 rounded-lg border transition-all ' +
+        (asgn==='knight' ? 'border-cyan-400 bg-cyan-900 text-cyan-300' : 'border-gray-600 text-gray-400 hover:border-cyan-500');
+    } else {
+      btn.className = 'flex-1 text-xs py-1.5 rounded-lg border transition-all ' +
+        (asgn==='liar' ? 'border-red-400 bg-red-900 text-red-300' : 'border-gray-600 text-gray-400 hover:border-red-500');
+    }
+  });
+}
+
+function checkSolution() {
+  const p = currentPuzzle;
+  const allSet = p.people.every(name => assignments[name] !== null);
+  if (!allSet) { showFeedback('warning', 'Please assign Knight or Liar to every person first.'); return; }
+
+  const correct = p.liars;
+  const userLiars = p.people.filter(name => assignments[name] === 'liar');
+  const isCorrect = correct.length === userLiars.length && correct.every(n => userLiars.includes(n));
+
+  if (isCorrect) {
+    stopTimer();
+    sessionStats.solved++;
+    sessionStats.streak++;
+    saveStats();
+    updateStatDisplay();
+    showFeedback('success', `Correct! You identified the ${correct.length === 1 ? 'liar' : 'liars'} in ${formatTime(timerSeconds)} using ${hintsUsed} hint${hintsUsed !== 1 ? 's' : ''}. 🎉`);
+  } else {
+    sessionStats.streak = 0;
+    saveStats();
+    updateStatDisplay();
+    const wrongLiars = userLiars.filter(n => !correct.includes(n));
+    const missedLiars = correct.filter(n => !userLiars.includes(n));
+    let msg = 'Not quite. ';
+    if (wrongLiars.length) msg += `${wrongLiars.join(', ')} ${wrongLiars.length===1?'is':'are'} not a liar. `;
+    if (missedLiars.length) msg += `You missed a liar among the others.`;
+    showFeedback('error', msg);
+  }
+}
+
+function useHint() {
+  const p = currentPuzzle;
+  // Find first person incorrectly assigned
+  for (const name of p.people) {
+    const correctType = p.liars.includes(name) ? 'liar' : 'knight';
+    if (assignments[name] !== correctType) {
+      hintsUsed++;
+      updateStatDisplay();
+      const action = assignments[name] === null ? 'is unassigned' : `is incorrectly marked as ${assignments[name]}`;
+      showFeedback('hint', `Hint: Consider ${name}'s statement more carefully — their current status ${action}.`);
+      // Flash the card
+      const card = document.getElementById('card-'+name);
+      card.style.outline = '2px solid #facc15';
+      setTimeout(() => card.style.outline = '', 2000);
+      return;
+    }
+  }
+  showFeedback('hint', 'All current assignments are correct so far!');
+}
+
+function showSolution() {
+  const p = currentPuzzle;
+  // Set correct assignments
+  p.people.forEach(name => {
+    assignments[name] = p.liars.includes(name) ? 'liar' : 'knight';
+    renderSuspectCard(name);
+  });
+  const panel = document.getElementById('solution-panel');
+  panel.className = 'bg-gray-800 rounded-2xl p-5';
+  const steps = document.getElementById('solution-steps');
+  steps.innerHTML = p.solution.map((step, i) =>
+    `<li class="step-entry flex gap-2 items-start"><span class="text-cyan-400 font-bold min-w-[1.5rem]">${i+1}.</span><span>${step}</span></li>`
+  ).join('');
+}
+
+function showFeedback(type, msg) {
+  const el = document.getElementById('feedback');
+  const colors = {
+    success: 'bg-green-900 border border-green-600 text-green-200',
+    error:   'bg-red-900 border border-red-600 text-red-200',
+    warning: 'bg-yellow-900 border border-yellow-600 text-yellow-200',
+    hint:    'bg-blue-900 border border-blue-600 text-blue-200'
+  };
+  el.className = `rounded-2xl p-4 mb-4 ${colors[type]}`;
+  el.textContent = msg;
+}
+
+function startTimer() {
+  stopTimer();
+  timerSeconds = 0;
+  updateTimerDisplay();
+  timerInterval = setInterval(() => {
+    timerSeconds++;
+    updateTimerDisplay();
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+}
+
+function updateTimerDisplay() {
+  document.getElementById('stat-time').textContent = formatTime(timerSeconds);
+}
+
+function formatTime(s) {
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+// ---- Init ----
+loadStats();
+setDifficulty('easy');
+</script>
+</body>
+</html>
